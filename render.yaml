@@ -1,0 +1,12 @@
+services:
+  - type: web
+    name: teknet-automation
+    env: python
+    plan: free
+    buildCommand: pip install -r requirements_render.txt
+    startCommand: gunicorn working_test_system:app
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.0
+      - key: FLASK_ENV
+        value: production
