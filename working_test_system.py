@@ -1,612 +1,572 @@
+#!/usr/bin/env python3
 """
-TekNet Global Automation System - DEPLOYMENT READY VERSION
-Fixed all dependency issues for successful Render deployment
+COMPLETE REAL AUTOMATION SYSTEM
+Integrates video generation, YouTube/Instagram/TikTok uploads, and real metrics tracking
 """
 
 import os
 import sqlite3
 import json
-import random
 import time
+import logging
 import threading
 from datetime import datetime, timedelta
-from flask import Flask, render_template_string, request, jsonify
+from flask import Flask, render_template_string, jsonify, request
 from flask_cors import CORS
 
-# YouTube API Configuration
-YOUTUBE_API_KEY = "AIzaSyBW_JpWitASGe4mEuv620atCt_j0Z1yOlA"
+# Import our custom modules
+from real_video_generator import RealVideoGenerator
+from youtube_uploader import YouTubeUploader
+from social_media_uploader import MultiPlatformUploader
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
 CORS(app)
 
-# Global automation state
-automation_running = False
-automation_thread = None
-
-def init_database():
-    """Initialize SQLite database with all required tables"""
-    conn = sqlite3.connect('automation.db')
-    cursor = conn.cursor()
-    
-    # Create accounts table
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS accounts (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            platform TEXT NOT NULL,
-            username TEXT NOT NULL,
-            oauth_connected BOOLEAN DEFAULT FALSE,
-            videos INTEGER DEFAULT 0,
-            views INTEGER DEFAULT 0,
-            revenue REAL DEFAULT 0.0,
-            url TEXT,
-            added_date TEXT DEFAULT CURRENT_TIMESTAMP
-        )
-    ''')
-    
-    # Create videos table
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS videos (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            title TEXT NOT NULL,
-            platform TEXT NOT NULL,
-            ai_service TEXT NOT NULL,
-            duration TEXT NOT NULL,
-            views INTEGER DEFAULT 0,
-            likes INTEGER DEFAULT 0,
-            comments INTEGER DEFAULT 0,
-            revenue REAL DEFAULT 0.0,
-            video_url TEXT,
-            video_file_path TEXT,
-            youtube_video_id TEXT,
-            status TEXT DEFAULT 'Generated',
-            created_date TEXT DEFAULT CURRENT_TIMESTAMP
-        )
-    ''')
-    
-    conn.commit()
-    conn.close()
-
-class VideoGenerator:
-    """Video generator with actual file creation"""
-    
+class CompleteAutomationSystem:
     def __init__(self):
-        self.ai_services = {
-            'invideo': 'InVideo AI - Professional',
-            'galaxy': 'Galaxy.ai - Viral Content', 
-            'autoshorts': 'AutoShorts.ai - Short Form',
-            'pollo': 'Pollo.ai - Creative',
-            'synthesia': 'Synthesia - AI Avatars'
-        }
-    
-    def generate_video_file(self, title, ai_service, duration):
-        """Generate actual video file"""
+        self.video_generator = RealVideoGenerator()
+        self.youtube_uploader = YouTubeUploader()
+        self.social_uploader = MultiPlatformUploader()
+        self.db_path = "automation_system.db"
+        self.automation_running = False
+        self.automation_thread = None
+        
+        # Initialize database
+        self.init_database()
+        
+    def init_database(self):
+        """Initialize SQLite database with all required tables"""
         try:
-            print(f"🎬 Generating video: {title}")
-            print(f"🤖 AI Service: {ai_service}")
-            print(f"⏱️ Duration: {duration}")
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
             
-            # Create videos directory if it doesn't exist
-            os.makedirs('generated_videos', exist_ok=True)
+            # Accounts table
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS accounts (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    platform TEXT NOT NULL,
+                    username TEXT NOT NULL,
+                    status TEXT DEFAULT 'connected',
+                    oauth_token TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            ''')
             
-            # Generate a video file
-            video_filename = f"video_{int(time.time())}_{ai_service}.mp4"
-            video_path = os.path.join('generated_videos', video_filename)
+            # Videos table
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS videos (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    title TEXT NOT NULL,
+                    platform TEXT NOT NULL,
+                    ai_service TEXT NOT NULL,
+                    duration INTEGER DEFAULT 30,
+                    file_path TEXT,
+                    video_id TEXT,
+                    video_url TEXT,
+                    views INTEGER DEFAULT 0,
+                    likes INTEGER DEFAULT 0,
+                    comments INTEGER DEFAULT 0,
+                    revenue REAL DEFAULT 0.0,
+                    status TEXT DEFAULT 'generated',
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            ''')
             
-            # Create video file with metadata
-            self._create_video_file(video_path, title, duration)
+            # Metrics table for historical tracking
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS metrics (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    video_id INTEGER,
+                    views INTEGER DEFAULT 0,
+                    likes INTEGER DEFAULT 0,
+                    comments INTEGER DEFAULT 0,
+                    revenue REAL DEFAULT 0.0,
+                    recorded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (video_id) REFERENCES videos (id)
+                )
+            ''')
             
-            print(f"✅ Video file created: {video_path}")
-            return video_path
+            conn.commit()
+            conn.close()
+            logger.info("✅ Database initialized successfully")
             
         except Exception as e:
-            print(f"❌ Error generating video: {e}")
-            return None
+            logger.error(f"Database initialization failed: {str(e)}")
     
-    def _create_video_file(self, output_path, title, duration):
-        """Create video file with proper metadata"""
+    def add_account(self, platform, username):
+        """Add a social media account"""
         try:
-            duration_seconds = self._parse_duration(duration)
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
             
-            # Create a video file with metadata
-            with open(output_path, 'w') as f:
-                f.write(f"# TekNet Global Video File\n")
-                f.write(f"Title: {title}\n")
-                f.write(f"Duration: {duration_seconds} seconds\n")
-                f.write(f"Generated: {datetime.now()}\n")
-                f.write(f"Status: Ready for upload\n")
-                f.write(f"File Size: {random.randint(1000, 5000)} KB\n")
-                f.write(f"Resolution: 1280x720\n")
-                f.write(f"Format: MP4\n")
+            # Check if account already exists
+            cursor.execute(
+                "SELECT id FROM accounts WHERE platform = ? AND username = ?",
+                (platform, username)
+            )
             
-            print(f"✅ Video file created successfully")
-            return True
+            if cursor.fetchone():
+                conn.close()
+                return {'success': False, 'error': 'Account already exists'}
+            
+            # Add new account
+            cursor.execute('''
+                INSERT INTO accounts (platform, username, status)
+                VALUES (?, ?, 'connected')
+            ''', (platform, username))
+            
+            conn.commit()
+            account_id = cursor.lastrowid
+            conn.close()
+            
+            logger.info(f"✅ Account added: {platform} - {username}")
+            return {
+                'success': True,
+                'account_id': account_id,
+                'platform': platform,
+                'username': username
+            }
             
         except Exception as e:
-            print(f"❌ Error creating video file: {e}")
-            return False
+            logger.error(f"Failed to add account: {str(e)}")
+            return {'success': False, 'error': str(e)}
     
-    def _parse_duration(self, duration_str):
-        """Parse duration string to seconds"""
-        if '30 seconds' in duration_str:
-            return 30
-        elif '60 seconds' in duration_str:
-            return 60
-        elif '90 seconds' in duration_str:
-            return 90
-        elif '2 minutes' in duration_str:
-            return 120
-        else:
-            return 60
-
-class YouTubeUploader:
-    """YouTube upload simulation with real API integration"""
-    
-    def __init__(self, api_key):
-        self.api_key = api_key
-    
-    def upload_video(self, video_path, title, description=""):
-        """Upload video to YouTube"""
+    def create_and_upload_video(self, title, ai_service, duration=30, platforms=None):
+        """Create a video and upload it to specified platforms"""
         try:
-            print(f"📤 Uploading to YouTube: {title}")
-            print(f"📁 Video file: {video_path}")
+            # Default platforms
+            if not platforms:
+                platforms = ['youtube', 'instagram', 'tiktok']
             
-            # Check if video file exists
-            if not os.path.exists(video_path):
-                print(f"❌ Video file not found: {video_path}")
-                return {'success': False, 'error': 'Video file not found'}
+            # Generate video file
+            logger.info(f"🎬 Creating video: {title}")
+            video_result = self.video_generator.generate_video_with_ai_service(
+                title=title,
+                ai_service=ai_service,
+                duration=duration
+            )
             
-            # Simulate upload (OAuth2 required for real uploads)
-            video_id = f"YT_{int(time.time())}"
-            video_url = f"https://www.youtube.com/watch?v={video_id}"
+            if not video_result['success']:
+                return {'success': False, 'error': f"Video generation failed: {video_result['error']}"}
             
-            print(f"✅ YouTube upload simulation successful")
-            print(f"🔗 Video URL: {video_url}")
+            video_file_path = video_result['file_path']
+            upload_results = {}
+            
+            # Upload to each platform
+            for platform in platforms:
+                if platform == 'youtube':
+                    result = self.youtube_uploader.upload_video(
+                        video_file_path=video_file_path,
+                        title=title,
+                        description=f"Generated by {ai_service.upper()} - TekNet Global Automation",
+                        tags=['automation', 'AI', 'TekNetGlobal']
+                    )
+                    upload_results['youtube'] = result
+                
+                elif platform == 'instagram':
+                    result = self.social_uploader.instagram.upload_video(
+                        video_file_path=video_file_path,
+                        caption=f"{title} 🚀 #automation #AI #TekNetGlobal",
+                        hashtags=['#viral', '#tech', '#socialmedia']
+                    )
+                    upload_results['instagram'] = result
+                
+                elif platform == 'tiktok':
+                    result = self.social_uploader.tiktok.upload_video(
+                        video_file_path=video_file_path,
+                        title=title,
+                        description=f"Amazing content created with {ai_service}!",
+                        hashtags=['#automation', '#AI', '#viral', '#tech']
+                    )
+                    upload_results['tiktok'] = result
+            
+            # Save to database
+            for platform, result in upload_results.items():
+                if result['success']:
+                    self.save_video_to_database(
+                        title=title,
+                        platform=platform,
+                        ai_service=ai_service,
+                        duration=duration,
+                        file_path=video_file_path,
+                        video_id=result.get('video_id', result.get('media_id')),
+                        video_url=result.get('video_url', result.get('post_url')),
+                        upload_result=result
+                    )
             
             return {
                 'success': True,
-                'video_id': video_id,
-                'video_url': video_url,
+                'video_file': video_file_path,
+                'upload_results': upload_results,
                 'title': title
             }
             
         except Exception as e:
-            print(f"❌ Error uploading to YouTube: {e}")
-            return {
-                'success': False,
-                'error': str(e)
-            }
+            logger.error(f"Video creation and upload failed: {str(e)}")
+            return {'success': False, 'error': str(e)}
     
-    def get_video_stats(self, video_id):
-        """Get video statistics"""
-        try:
-            # Return realistic stats for testing
-            return {
-                'views': random.randint(100, 5000),
-                'likes': random.randint(10, 200),
-                'comments': random.randint(1, 50)
-            }
-            
-        except Exception as e:
-            print(f"Error getting YouTube stats: {e}")
-            return {
-                'views': random.randint(50, 500),
-                'likes': random.randint(2, 25),
-                'comments': random.randint(0, 10)
-            }
-
-class AutomationEngine:
-    """Main automation engine for content creation and distribution"""
-    
-    def __init__(self):
-        self.video_generator = VideoGenerator()
-        self.youtube_uploader = YouTubeUploader(YOUTUBE_API_KEY)
-        self.content_topics = [
-            "5 Passive Income Ideas That Actually Work",
-            "How to Start a Successful Online Business",
-            "Morning Routine of Successful Entrepreneurs", 
-            "10 Habits That Changed My Life",
-            "How to Make Money on Social Media",
-            "The Secret to Building Wealth",
-            "Productivity Hacks for Busy People",
-            "How to Overcome Fear and Take Action",
-            "Best Investment Strategies for Beginners",
-            "Time Management Tips for Entrepreneurs"
-        ]
-    
-    def create_and_upload_video(self, topic=None, ai_service=None, duration=None):
-        """Create and upload a video with specified parameters"""
-        try:
-            # Use provided parameters or defaults
-            if not topic:
-                topic = random.choice(self.content_topics)
-            if not ai_service:
-                ai_service = random.choice(list(self.video_generator.ai_services.keys()))
-            if not duration:
-                duration = random.choice(['30 seconds', '60 seconds', '90 seconds'])
-            
-            print(f"🚀 Starting video creation process...")
-            print(f"📝 Topic: {topic}")
-            print(f"🤖 AI Service: {ai_service}")
-            print(f"⏱️ Duration: {duration}")
-            
-            # Generate video file
-            video_path = self.video_generator.generate_video_file(topic, ai_service, duration)
-            
-            if not video_path:
-                print("❌ Failed to generate video file")
-                return False
-            
-            # Upload to YouTube
-            upload_result = self.youtube_uploader.upload_video(video_path, topic)
-            
-            if upload_result['success']:
-                # Save to database
-                video_id = self._save_video_to_db(
-                    title=topic,
-                    platform='youtube',
-                    ai_service=self.video_generator.ai_services[ai_service],
-                    duration=duration,
-                    video_url=upload_result['video_url'],
-                    video_file_path=video_path,
-                    youtube_video_id=upload_result['video_id']
-                )
-                
-                # Update account stats
-                self._update_account_stats('youtube', video_id)
-                
-                print(f"✅ Successfully created and uploaded: {topic}")
-                return True
-            else:
-                print(f"❌ Failed to upload video: {upload_result.get('error', 'Unknown error')}")
-                return False
-                
-        except Exception as e:
-            print(f"❌ Error in automation: {e}")
-            return False
-    
-    def _save_video_to_db(self, title, platform, ai_service, duration, video_url, video_file_path, youtube_video_id):
+    def save_video_to_database(self, title, platform, ai_service, duration, file_path, video_id, video_url, upload_result):
         """Save video information to database"""
         try:
-            conn = sqlite3.connect('automation.db')
+            conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
             
-            # Get realistic stats
-            stats = self.youtube_uploader.get_video_stats(youtube_video_id)
-            revenue = stats['views'] * 0.003  # $3 per 1000 views
+            # Get initial statistics if available
+            stats = self.get_video_statistics(platform, video_id)
+            views = stats.get('views', 0) if stats else 0
+            likes = stats.get('likes', 0) if stats else 0
+            comments = stats.get('comments', 0) if stats else 0
+            revenue = self.calculate_revenue(platform, views)
             
             cursor.execute('''
-                INSERT INTO videos (title, platform, ai_service, duration, views, likes, comments, 
-                                  revenue, video_url, video_file_path, youtube_video_id, status)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ''', (title, platform, ai_service, duration, stats['views'], stats['likes'], 
-                  stats['comments'], revenue, video_url, video_file_path, youtube_video_id, 'Video Uploaded'))
+                INSERT INTO videos (
+                    title, platform, ai_service, duration, file_path, 
+                    video_id, video_url, views, likes, comments, revenue, status
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'uploaded')
+            ''', (title, platform, ai_service, duration, file_path, video_id, video_url, views, likes, comments, revenue))
             
-            video_id = cursor.lastrowid
+            video_db_id = cursor.lastrowid
+            
+            # Save initial metrics
+            cursor.execute('''
+                INSERT INTO metrics (video_id, views, likes, comments, revenue)
+                VALUES (?, ?, ?, ?, ?)
+            ''', (video_db_id, views, likes, comments, revenue))
+            
             conn.commit()
             conn.close()
             
-            print(f"💾 Video saved to database with ID: {video_id}")
-            return video_id
+            logger.info(f"✅ Video saved to database: {title} on {platform}")
             
         except Exception as e:
-            print(f"❌ Error saving video to database: {e}")
+            logger.error(f"Failed to save video to database: {str(e)}")
+    
+    def get_video_statistics(self, platform, video_id):
+        """Get statistics for a video from the platform"""
+        try:
+            if platform == 'youtube':
+                return self.youtube_uploader.get_video_statistics(video_id)
+            elif platform == 'instagram':
+                return self.social_uploader.instagram.get_post_statistics(video_id)
+            elif platform == 'tiktok':
+                return self.social_uploader.tiktok.get_video_statistics(video_id)
+            return None
+        except Exception as e:
+            logger.error(f"Failed to get statistics for {platform} video {video_id}: {str(e)}")
             return None
     
-    def _update_account_stats(self, platform, video_id):
-        """Update account statistics"""
+    def calculate_revenue(self, platform, views):
+        """Calculate revenue based on platform and views"""
+        # Revenue per 1000 views (RPM)
+        rpm_rates = {
+            'youtube': 2.5,  # $2.50 per 1000 views
+            'instagram': 1.8,  # $1.80 per 1000 views
+            'tiktok': 0.8   # $0.80 per 1000 views
+        }
+        
+        rpm = rpm_rates.get(platform, 1.0)
+        return (views / 1000) * rpm
+    
+    def update_all_video_metrics(self):
+        """Update metrics for all videos from platform APIs"""
         try:
-            conn = sqlite3.connect('automation.db')
+            conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
             
-            # Get video stats
-            cursor.execute('SELECT views, revenue FROM videos WHERE id = ?', (video_id,))
-            result = cursor.fetchone()
+            cursor.execute("SELECT id, platform, video_id FROM videos WHERE status = 'uploaded'")
+            videos = cursor.fetchall()
             
-            if result:
-                views, revenue = result
+            for video_id, platform, platform_video_id in videos:
+                stats = self.get_video_statistics(platform, platform_video_id)
                 
-                # Update account stats
-                cursor.execute('''
-                    UPDATE accounts 
-                    SET videos = videos + 1, views = views + ?, revenue = revenue + ?
-                    WHERE platform = ?
-                ''', (views, revenue, platform))
-                
-                conn.commit()
-                print(f"📊 Updated {platform} account stats: +{views} views, +${revenue:.2f} revenue")
+                if stats:
+                    views = stats.get('views', 0)
+                    likes = stats.get('likes', 0)
+                    comments = stats.get('comments', 0)
+                    revenue = self.calculate_revenue(platform, views)
+                    
+                    # Update video record
+                    cursor.execute('''
+                        UPDATE videos 
+                        SET views = ?, likes = ?, comments = ?, revenue = ?, updated_at = CURRENT_TIMESTAMP
+                        WHERE id = ?
+                    ''', (views, likes, comments, revenue, video_id))
+                    
+                    # Add metrics record
+                    cursor.execute('''
+                        INSERT INTO metrics (video_id, views, likes, comments, revenue)
+                        VALUES (?, ?, ?, ?, ?)
+                    ''', (video_id, views, likes, comments, revenue))
+            
+            conn.commit()
+            conn.close()
+            
+            logger.info("✅ All video metrics updated")
+            
+        except Exception as e:
+            logger.error(f"Failed to update video metrics: {str(e)}")
+    
+    def get_system_statistics(self):
+        """Get overall system statistics"""
+        try:
+            conn = sqlite3.connect(self.db_path)
+            cursor = conn.cursor()
+            
+            # Account statistics
+            cursor.execute("SELECT COUNT(*) FROM accounts WHERE status = 'connected'")
+            connected_accounts = cursor.fetchone()[0]
+            
+            # Video statistics
+            cursor.execute("SELECT COUNT(*) FROM videos")
+            total_videos = cursor.fetchone()[0]
+            
+            cursor.execute("SELECT COUNT(*) FROM videos WHERE DATE(created_at) = DATE('now')")
+            today_videos = cursor.fetchone()[0]
+            
+            cursor.execute("SELECT SUM(views), SUM(likes), SUM(revenue) FROM videos")
+            totals = cursor.fetchone()
+            total_views = totals[0] or 0
+            total_likes = totals[1] or 0
+            total_revenue = totals[2] or 0.0
+            
+            # Platform breakdown
+            cursor.execute('''
+                SELECT platform, COUNT(*) as videos, SUM(views) as views, SUM(revenue) as revenue
+                FROM videos 
+                GROUP BY platform
+            ''')
+            platform_stats = cursor.fetchall()
             
             conn.close()
             
+            return {
+                'connected_accounts': connected_accounts,
+                'total_videos': total_videos,
+                'today_videos': today_videos,
+                'total_views': total_views,
+                'total_likes': total_likes,
+                'total_revenue': round(total_revenue, 2),
+                'platform_breakdown': [
+                    {
+                        'platform': row[0],
+                        'videos': row[1],
+                        'views': row[2] or 0,
+                        'revenue': round(row[3] or 0.0, 2)
+                    }
+                    for row in platform_stats
+                ]
+            }
+            
         except Exception as e:
-            print(f"❌ Error updating account stats: {e}")
-
-# Initialize automation engine
-automation_engine = AutomationEngine()
-
-def automation_worker():
-    """Background automation worker"""
-    global automation_running
+            logger.error(f"Failed to get system statistics: {str(e)}")
+            return {
+                'connected_accounts': 0,
+                'total_videos': 0,
+                'today_videos': 0,
+                'total_views': 0,
+                'total_likes': 0,
+                'total_revenue': 0.0,
+                'platform_breakdown': []
+            }
     
-    while automation_running:
-        try:
-            print("🤖 Automation cycle starting...")
-            success = automation_engine.create_and_upload_video()
-            
-            if success:
-                print("✅ Automation cycle completed successfully")
-            else:
-                print("⚠️ Automation cycle failed")
-            
-            # Wait 2-5 minutes between videos
-            wait_time = random.randint(120, 300)
-            print(f"⏳ Waiting {wait_time} seconds until next cycle...")
-            
-            for _ in range(wait_time):
-                if not automation_running:
-                    break
-                time.sleep(1)
+    def start_automation(self):
+        """Start the automation process"""
+        if self.automation_running:
+            return {'success': False, 'error': 'Automation already running'}
+        
+        self.automation_running = True
+        self.automation_thread = threading.Thread(target=self.automation_worker)
+        self.automation_thread.daemon = True
+        self.automation_thread.start()
+        
+        logger.info("🚀 Automation started")
+        return {'success': True, 'message': 'Automation started'}
+    
+    def stop_automation(self):
+        """Stop the automation process"""
+        self.automation_running = False
+        logger.info("⏹️ Automation stopped")
+        return {'success': True, 'message': 'Automation stopped'}
+    
+    def automation_worker(self):
+        """Background automation worker"""
+        video_topics = [
+            "5 Passive Income Ideas That Actually Work",
+            "How to Start a Successful Online Business in 2025",
+            "Morning Routine of Successful Entrepreneurs",
+            "10 Habits That Changed My Life Forever",
+            "How to Make Money on Social Media",
+            "The Secret to Building Wealth in Your 20s",
+            "Productivity Hacks for Busy People",
+            "How to Overcome Fear and Take Action",
+            "Best Investment Strategies for Beginners",
+            "Time Management Tips That Actually Work"
+        ]
+        
+        ai_services = ['galaxy', 'invideo', 'autoshorts', 'pollo', 'synthesia']
+        
+        while self.automation_running:
+            try:
+                # Create a video every 5-10 minutes
+                import random
+                topic = random.choice(video_topics)
+                ai_service = random.choice(ai_services)
+                duration = random.choice([30, 60, 90])
                 
-        except Exception as e:
-            print(f"❌ Error in automation worker: {e}")
-            time.sleep(60)  # Wait 1 minute before retrying
-    
-    print("🛑 Automation worker stopped")
+                logger.info(f"🎬 Automation creating: {topic}")
+                
+                result = self.create_and_upload_video(
+                    title=topic,
+                    ai_service=ai_service,
+                    duration=duration
+                )
+                
+                if result['success']:
+                    logger.info(f"✅ Automation video created: {topic}")
+                else:
+                    logger.error(f"❌ Automation video failed: {result.get('error')}")
+                
+                # Wait 5-10 minutes before next video
+                wait_time = random.randint(300, 600)  # 5-10 minutes
+                time.sleep(wait_time)
+                
+            except Exception as e:
+                logger.error(f"Automation worker error: {str(e)}")
+                time.sleep(60)  # Wait 1 minute before retrying
 
-# API Routes
+# Initialize the system
+automation_system = CompleteAutomationSystem()
+
+# Flask routes
 @app.route('/')
 def dashboard():
     """Main dashboard"""
     return render_template_string(DASHBOARD_HTML)
 
 @app.route('/api/status')
-def get_status():
+def api_status():
     """Get system status"""
-    try:
-        conn = sqlite3.connect('automation.db')
-        cursor = conn.cursor()
-        
-        # Get counts
-        cursor.execute('SELECT COUNT(*) FROM accounts WHERE oauth_connected = 1')
-        connected_accounts = cursor.fetchone()[0]
-        
-        cursor.execute('SELECT COUNT(*) FROM videos')
-        total_videos = cursor.fetchone()[0]
-        
-        cursor.execute('SELECT COUNT(*) FROM videos WHERE DATE(created_date) = DATE("now")')
-        today_videos = cursor.fetchone()[0]
-        
-        conn.close()
-        
-        return jsonify({
-            'automation_status': 'RUNNING' if automation_running else 'STOPPED',
-            'connected_accounts': connected_accounts,
-            'total_videos': total_videos,
-            'today_videos': today_videos
-        })
-        
-    except Exception as e:
-        print(f"Error getting status: {e}")
-        return jsonify({
-            'automation_status': 'STOPPED',
-            'connected_accounts': 0,
-            'total_videos': 0,
-            'today_videos': 0
-        })
+    stats = automation_system.get_system_statistics()
+    stats['automation_running'] = automation_system.automation_running
+    return jsonify(stats)
 
 @app.route('/api/accounts')
-def get_accounts():
-    """Get connected accounts"""
+def api_accounts():
+    """Get all accounts"""
     try:
-        conn = sqlite3.connect('automation.db')
+        conn = sqlite3.connect(automation_system.db_path)
         cursor = conn.cursor()
-        
-        cursor.execute('SELECT * FROM accounts WHERE oauth_connected = 1')
-        accounts = cursor.fetchall()
-        
+        cursor.execute("SELECT platform, username, status, created_at FROM accounts")
+        accounts = [
+            {
+                'platform': row[0],
+                'username': row[1],
+                'status': row[2],
+                'created_at': row[3]
+            }
+            for row in cursor.fetchall()
+        ]
         conn.close()
-        
-        return jsonify([{
-            'id': account[0],
-            'platform': account[1],
-            'username': account[2],
-            'oauth_connected': account[3],
-            'videos': account[4],
-            'views': account[5],
-            'revenue': account[6],
-            'url': account[7],
-            'added_date': account[8]
-        } for account in accounts])
-        
+        return jsonify(accounts)
     except Exception as e:
-        print(f"Error getting accounts: {e}")
-        return jsonify([])
+        return jsonify({'error': str(e)}), 500
 
 @app.route('/api/videos')
-def get_videos():
+def api_videos():
     """Get recent videos"""
     try:
-        conn = sqlite3.connect('automation.db')
+        conn = sqlite3.connect(automation_system.db_path)
         cursor = conn.cursor()
-        
-        cursor.execute('SELECT * FROM videos ORDER BY created_date DESC LIMIT 10')
-        videos = cursor.fetchall()
-        
-        conn.close()
-        
-        return jsonify([{
-            'id': video[0],
-            'title': video[1],
-            'platform': video[2],
-            'ai_service': video[3],
-            'duration': video[4],
-            'views': video[5],
-            'likes': video[6],
-            'comments': video[7],
-            'revenue': video[8],
-            'video_url': video[9],
-            'video_file_path': video[10],
-            'youtube_video_id': video[11],
-            'status': video[12],
-            'created_date': video[13]
-        } for video in videos])
-        
-    except Exception as e:
-        print(f"Error getting videos: {e}")
-        return jsonify([])
-
-@app.route('/api/oauth/connect/<platform>', methods=['POST'])
-def connect_oauth(platform):
-    """Connect OAuth account"""
-    try:
-        # Platform-specific account data
-        account_data = {
-            'youtube': {
-                'username': 'TekNet Global',
-                'url': 'https://www.youtube.com/@TekNetGlobal1'
-            },
-            'instagram': {
-                'username': 'teknetglobal',
-                'url': 'https://www.instagram.com/teknetglobal/'
-            },
-            'tiktok': {
-                'username': 'teknetglobal',
-                'url': 'https://www.tiktok.com/@teknetglobal'
+        cursor.execute('''
+            SELECT title, platform, ai_service, views, likes, revenue, video_url, created_at
+            FROM videos 
+            ORDER BY created_at DESC 
+            LIMIT 10
+        ''')
+        videos = [
+            {
+                'title': row[0],
+                'platform': row[1],
+                'ai_service': row[2],
+                'views': row[3],
+                'likes': row[4],
+                'revenue': row[5],
+                'video_url': row[6],
+                'created_at': row[7]
             }
-        }
-        
-        if platform not in account_data:
-            return jsonify({'success': False, 'message': 'Invalid platform'})
-        
-        conn = sqlite3.connect('automation.db')
-        cursor = conn.cursor()
-        
-        # Check if account already exists
-        cursor.execute('SELECT id FROM accounts WHERE platform = ?', (platform,))
-        existing = cursor.fetchone()
-        
-        if existing:
-            # Update existing account
-            cursor.execute('''
-                UPDATE accounts 
-                SET oauth_connected = 1, username = ?, url = ?
-                WHERE platform = ?
-            ''', (account_data[platform]['username'], account_data[platform]['url'], platform))
-        else:
-            # Insert new account
-            cursor.execute('''
-                INSERT INTO accounts (platform, username, oauth_connected, url)
-                VALUES (?, ?, 1, ?)
-            ''', (platform, account_data[platform]['username'], account_data[platform]['url']))
-        
-        conn.commit()
+            for row in cursor.fetchall()
+        ]
         conn.close()
-        
-        return jsonify({
-            'success': True,
-            'message': f'{platform.title()} account connected successfully!'
-        })
-        
+        return jsonify(videos)
     except Exception as e:
-        print(f"Error connecting OAuth: {e}")
-        return jsonify({
-            'success': False,
-            'message': f'Error connecting {platform}: {str(e)}'
-        })
+        return jsonify({'error': str(e)}), 500
 
-@app.route('/api/start-automation', methods=['POST'])
-def start_automation():
-    """Start automation"""
-    global automation_running, automation_thread
+@app.route('/api/connect-account', methods=['POST'])
+def api_connect_account():
+    """Connect a social media account"""
+    data = request.get_json()
+    platform = data.get('platform')
     
-    try:
-        if not automation_running:
-            automation_running = True
-            automation_thread = threading.Thread(target=automation_worker)
-            automation_thread.daemon = True
-            automation_thread.start()
-            
-            return jsonify({
-                'success': True,
-                'message': 'Automation started successfully!'
-            })
-        else:
-            return jsonify({
-                'success': False,
-                'message': 'Automation is already running'
-            })
-            
-    except Exception as e:
-        return jsonify({
-            'success': False,
-            'message': f'Error starting automation: {str(e)}'
-        })
-
-@app.route('/api/stop-automation', methods=['POST'])
-def stop_automation():
-    """Stop automation"""
-    global automation_running
+    # Platform-specific usernames
+    usernames = {
+        'youtube': 'TekNetGlobal1',
+        'instagram': 'teknetglobal',
+        'tiktok': 'teknetglobal'
+    }
     
-    try:
-        automation_running = False
-        
-        return jsonify({
-            'success': True,
-            'message': 'Automation stopped successfully!'
-        })
-        
-    except Exception as e:
-        return jsonify({
-            'success': False,
-            'message': f'Error stopping automation: {str(e)}'
-        })
+    username = usernames.get(platform, 'teknetglobal')
+    result = automation_system.add_account(platform, username)
+    
+    return jsonify(result)
 
 @app.route('/api/generate-video', methods=['POST'])
-def generate_video():
-    """Generate video manually - FIXED VERSION"""
-    try:
-        data = request.get_json()
-        topic = data.get('topic', 'How to Make Money Online in 2025')
-        ai_service = data.get('ai_service', 'invideo')
-        duration = data.get('duration', '60 seconds')
-        
-        print(f"🎬 Manual video generation requested:")
-        print(f"📝 Topic: {topic}")
-        print(f"🤖 AI Service: {ai_service}")
-        print(f"⏱️ Duration: {duration}")
-        
-        # Generate and upload video with user-specified parameters
-        success = automation_engine.create_and_upload_video(
-            topic=topic,
-            ai_service=ai_service,
-            duration=duration
-        )
-        
-        if success:
-            return jsonify({
-                'success': True,
-                'message': f'✅ Video "{topic}" generated and uploaded successfully!'
-            })
-        else:
-            return jsonify({
-                'success': False,
-                'message': '❌ Failed to generate video. Check server logs for details.'
-            })
-            
-    except Exception as e:
-        print(f"❌ Error in generate_video endpoint: {e}")
-        return jsonify({
-            'success': False,
-            'message': f'Error generating video: {str(e)}'
-        })
+def api_generate_video():
+    """Generate a video"""
+    data = request.get_json()
+    title = data.get('title', 'Test Video')
+    ai_service = data.get('ai_service', 'galaxy')
+    duration = int(data.get('duration', 30))
+    
+    result = automation_system.create_and_upload_video(
+        title=title,
+        ai_service=ai_service,
+        duration=duration
+    )
+    
+    return jsonify(result)
 
-# Dashboard HTML Template
+@app.route('/api/automation/<action>', methods=['POST'])
+def api_automation(action):
+    """Control automation"""
+    if action == 'start':
+        result = automation_system.start_automation()
+    elif action == 'stop':
+        result = automation_system.stop_automation()
+    else:
+        result = {'success': False, 'error': 'Invalid action'}
+    
+    return jsonify(result)
+
+@app.route('/api/refresh-data', methods=['POST'])
+def api_refresh_data():
+    """Refresh all data"""
+    automation_system.update_all_video_metrics()
+    return jsonify({'success': True, 'message': 'Data refreshed'})
+
+# HTML Template
 DASHBOARD_HTML = '''
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>TekNet Global - DEPLOYMENT READY SYSTEM</title>
+    <title>REAL Automation System - TekNet Global</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body { 
@@ -617,397 +577,364 @@ DASHBOARD_HTML = '''
         }
         .container { max-width: 1200px; margin: 0 auto; padding: 20px; }
         .header { text-align: center; margin-bottom: 30px; }
-        .header h1 { font-size: 2.5em; margin-bottom: 10px; }
-        .header h2 { font-size: 1.5em; color: #00ff88; margin-bottom: 10px; }
+        .header h1 { font-size: 2.5em; margin-bottom: 10px; text-shadow: 2px 2px 4px rgba(0,0,0,0.3); }
         .header p { font-size: 1.2em; opacity: 0.9; }
-        .status-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 20px; margin-bottom: 30px; }
-        .card { 
-            background: rgba(255, 255, 255, 0.1);
-            backdrop-filter: blur(10px);
-            border-radius: 15px;
-            padding: 20px;
+        .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px; margin-bottom: 30px; }
+        .stat-card { 
+            background: rgba(255,255,255,0.1); 
+            padding: 20px; 
+            border-radius: 15px; 
             text-align: center;
-            border: 1px solid rgba(255, 255, 255, 0.2);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255,255,255,0.2);
         }
-        .card h3 { font-size: 1.2em; margin-bottom: 10px; opacity: 0.8; }
-        .card .value { font-size: 2em; font-weight: bold; margin-bottom: 5px; }
-        .card .label { font-size: 0.9em; opacity: 0.7; }
-        .controls { display: flex; gap: 15px; justify-content: center; margin-bottom: 30px; flex-wrap: wrap; }
+        .stat-card h3 { font-size: 2em; margin-bottom: 5px; color: #FFD700; }
+        .stat-card p { opacity: 0.9; }
+        .controls { display: flex; gap: 15px; margin-bottom: 30px; flex-wrap: wrap; }
         .btn { 
-            padding: 12px 24px;
-            border: none;
-            border-radius: 25px;
-            font-size: 1em;
+            padding: 12px 24px; 
+            border: none; 
+            border-radius: 25px; 
+            cursor: pointer; 
             font-weight: bold;
-            cursor: pointer;
             transition: all 0.3s ease;
             text-decoration: none;
             display: inline-block;
         }
-        .btn-success { background: linear-gradient(45deg, #00b894, #00cec9); color: white; }
-        .btn-danger { background: linear-gradient(45deg, #e17055, #d63031); color: white; }
-        .btn-primary { background: linear-gradient(45deg, #74b9ff, #0984e3); color: white; }
-        .btn-info { background: linear-gradient(45deg, #a29bfe, #6c5ce7); color: white; }
+        .btn-primary { background: #4CAF50; color: white; }
+        .btn-secondary { background: #2196F3; color: white; }
+        .btn-danger { background: #f44336; color: white; }
         .btn:hover { transform: translateY(-2px); box-shadow: 0 5px 15px rgba(0,0,0,0.3); }
         .section { 
-            background: rgba(255, 255, 255, 0.1);
-            backdrop-filter: blur(10px);
-            border-radius: 15px;
-            padding: 25px;
+            background: rgba(255,255,255,0.1); 
+            padding: 25px; 
+            border-radius: 15px; 
             margin-bottom: 25px;
-            border: 1px solid rgba(255, 255, 255, 0.2);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255,255,255,0.2);
         }
-        .section h2 { margin-bottom: 20px; text-align: center; }
-        .oauth-buttons { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 15px; margin-bottom: 20px; }
-        .oauth-btn { 
-            padding: 15px;
-            border: none;
-            border-radius: 10px;
-            font-size: 1.1em;
-            font-weight: bold;
-            cursor: pointer;
-            transition: all 0.3s ease;
-            color: white;
-        }
-        .oauth-btn.youtube { background: linear-gradient(45deg, #ff0000, #cc0000); }
-        .oauth-btn.instagram { background: linear-gradient(45deg, #e1306c, #fd1d1d, #fcb045); }
-        .oauth-btn.tiktok { background: linear-gradient(45deg, #000000, #ff0050); }
-        .oauth-btn:hover { transform: translateY(-2px); box-shadow: 0 5px 15px rgba(0,0,0,0.3); }
-        .accounts-list { margin-top: 20px; }
-        .account-item { 
-            background: rgba(255, 255, 255, 0.1);
-            border-radius: 10px;
-            padding: 15px;
-            margin-bottom: 10px;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-        .account-info { flex: 1; }
-        .account-stats { display: flex; gap: 15px; font-size: 0.9em; }
-        .video-generation { margin-top: 20px; }
-        .form-group { margin-bottom: 15px; }
-        .form-group label { display: block; margin-bottom: 5px; font-weight: bold; }
+        .section h2 { margin-bottom: 20px; color: #FFD700; }
+        .video-form { display: grid; grid-template-columns: 1fr 200px 150px auto; gap: 15px; align-items: end; }
+        .form-group { display: flex; flex-direction: column; }
+        .form-group label { margin-bottom: 5px; font-weight: bold; }
         .form-group input, .form-group select { 
-            width: 100%;
-            padding: 10px;
-            border: none;
-            border-radius: 5px;
-            font-size: 1em;
-            background: rgba(255, 255, 255, 0.9);
+            padding: 10px; 
+            border: none; 
+            border-radius: 8px; 
+            background: rgba(255,255,255,0.9);
             color: #333;
         }
-        .videos-list { margin-top: 20px; }
-        .video-item { 
-            background: rgba(255, 255, 255, 0.1);
-            border-radius: 10px;
-            padding: 15px;
-            margin-bottom: 10px;
+        .accounts-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px; }
+        .account-card { 
+            background: rgba(255,255,255,0.05); 
+            padding: 20px; 
+            border-radius: 12px; 
+            border: 1px solid rgba(255,255,255,0.2);
         }
-        .video-title { font-weight: bold; margin-bottom: 10px; }
-        .video-stats { display: flex; gap: 15px; font-size: 0.9em; flex-wrap: wrap; }
-        .success-message { 
-            background: rgba(0, 184, 148, 0.2);
-            border: 1px solid #00b894;
-            color: #00ff88;
-            padding: 15px;
-            border-radius: 10px;
-            margin-bottom: 20px;
-            text-align: center;
+        .account-card h3 { color: #FFD700; margin-bottom: 10px; }
+        .status-connected { color: #4CAF50; font-weight: bold; }
+        .videos-list { max-height: 400px; overflow-y: auto; }
+        .video-item { 
+            background: rgba(255,255,255,0.05); 
+            padding: 15px; 
+            border-radius: 8px; 
+            margin-bottom: 10px;
+            border: 1px solid rgba(255,255,255,0.1);
+        }
+        .video-item h4 { color: #FFD700; margin-bottom: 8px; }
+        .video-stats { display: flex; gap: 15px; font-size: 0.9em; opacity: 0.8; }
+        .automation-status { 
+            display: inline-block; 
+            padding: 5px 15px; 
+            border-radius: 20px; 
             font-weight: bold;
+            margin-left: 10px;
+        }
+        .status-running { background: #4CAF50; }
+        .status-stopped { background: #f44336; }
+        @media (max-width: 768px) {
+            .video-form { grid-template-columns: 1fr; }
+            .controls { justify-content: center; }
         }
     </style>
 </head>
 <body>
     <div class="container">
         <div class="header">
-            <h1>🚀 TekNet Global</h1>
-            <h2>DEPLOYMENT READY SYSTEM</h2>
-            <p>✅ NO DEPENDENCY ISSUES • ✅ RENDER COMPATIBLE • ✅ REAL VIDEO GENERATION</p>
+            <h1>🚀 REAL Automation System</h1>
+            <p>TekNet Global - Complete Video Generation & Upload System</p>
+            <span id="automationStatus" class="automation-status status-stopped">⏹️ STOPPED</span>
         </div>
 
-        <div class="success-message">
-            🎉 <strong>SYSTEM DEPLOYED!</strong> Video generation works with your input and creates real files!
-        </div>
-
-        <div class="status-cards">
-            <div class="card">
-                <h3>🤖 Automation Status</h3>
-                <div class="value" id="automation-status">STOPPED</div>
-                <div class="label">System Status</div>
+        <div class="stats-grid">
+            <div class="stat-card">
+                <h3 id="connectedAccounts">0</h3>
+                <p>Connected Accounts</p>
             </div>
-            <div class="card">
-                <h3>📊 Connected Accounts</h3>
-                <div class="value" id="connected-accounts">0</div>
-                <div class="label">OAuth Authenticated</div>
+            <div class="stat-card">
+                <h3 id="totalVideos">0</h3>
+                <p>Total Videos</p>
             </div>
-            <div class="card">
-                <h3>🎬 Total Videos</h3>
-                <div class="value" id="total-videos">0</div>
-                <div class="label">Content Created</div>
+            <div class="stat-card">
+                <h3 id="todayVideos">0</h3>
+                <p>Today's Videos</p>
             </div>
-            <div class="card">
-                <h3>📈 Today's Videos</h3>
-                <div class="value" id="today-videos">0</div>
-                <div class="label">Daily Progress</div>
+            <div class="stat-card">
+                <h3 id="totalViews">0</h3>
+                <p>Total Views</p>
+            </div>
+            <div class="stat-card">
+                <h3 id="totalRevenue">$0.00</h3>
+                <p>Total Revenue</p>
             </div>
         </div>
 
         <div class="controls">
-            <button class="btn btn-success" onclick="startAutomation()">🚀 START AUTOMATION</button>
+            <button class="btn btn-primary" onclick="connectAccount('youtube')">📺 Connect YouTube</button>
+            <button class="btn btn-primary" onclick="connectAccount('instagram')">📸 Connect Instagram</button>
+            <button class="btn btn-primary" onclick="connectAccount('tiktok')">🎵 Connect TikTok</button>
+            <button class="btn btn-secondary" onclick="startAutomation()">🚀 START AUTOMATION</button>
             <button class="btn btn-danger" onclick="stopAutomation()">⏹️ STOP AUTOMATION</button>
-            <button class="btn btn-primary" onclick="generateVideo()">🎬 GENERATE VIDEO</button>
-            <button class="btn btn-info" onclick="refreshData()">🔄 REFRESH DATA</button>
-        </div>
-
-        <div class="section">
-            <h2>🔐 Connect TekNet Global Accounts</h2>
-            <div class="oauth-buttons">
-                <button class="oauth-btn youtube" onclick="connectOAuth('youtube')">
-                    📺 Connect YouTube<br>
-                    <small>@TekNetGlobal1 & @TekNetShorts</small>
-                </button>
-                <button class="oauth-btn instagram" onclick="connectOAuth('instagram')">
-                    📸 Connect Instagram<br>
-                    <small>@teknetglobal</small>
-                </button>
-                <button class="oauth-btn tiktok" onclick="connectOAuth('tiktok')">
-                    🎵 Connect TikTok<br>
-                    <small>@teknetglobal</small>
-                </button>
-            </div>
-            
-            <h3>🔗 Connected Accounts</h3>
-            <div id="accounts-list" class="accounts-list">
-                <p>Loading accounts...</p>
-            </div>
+            <button class="btn btn-secondary" onclick="refreshData()">🔄 REFRESH DATA</button>
         </div>
 
         <div class="section">
             <h2>🎬 AI Video Generation</h2>
-            <div class="video-generation">
+            <div class="video-form">
                 <div class="form-group">
-                    <label for="video-topic">Video Topic</label>
-                    <input type="text" id="video-topic" placeholder="e.g., How to Make Money with YouTube in 2025">
+                    <label>Video Topic</label>
+                    <input type="text" id="videoTopic" placeholder="e.g., 5 Ways to Make Money Online">
                 </div>
                 <div class="form-group">
-                    <label for="ai-service">AI Service</label>
-                    <select id="ai-service">
-                        <option value="invideo">InVideo AI - Professional</option>
+                    <label>AI Service</label>
+                    <select id="aiService">
                         <option value="galaxy">Galaxy.ai - Viral Content</option>
+                        <option value="invideo">InVideo AI - Professional</option>
                         <option value="autoshorts">AutoShorts.ai - Short Form</option>
                         <option value="pollo">Pollo.ai - Creative</option>
                         <option value="synthesia">Synthesia - AI Avatars</option>
                     </select>
                 </div>
                 <div class="form-group">
-                    <label for="duration">Duration</label>
-                    <select id="duration">
-                        <option value="30 seconds">30 seconds</option>
-                        <option value="60 seconds">60 seconds</option>
-                        <option value="90 seconds">90 seconds</option>
-                        <option value="2 minutes">2 minutes</option>
+                    <label>Duration</label>
+                    <select id="videoDuration">
+                        <option value="30">30 seconds</option>
+                        <option value="60">60 seconds</option>
+                        <option value="90">90 seconds</option>
+                        <option value="120">2 minutes</option>
                     </select>
                 </div>
-                <button class="btn btn-success" onclick="generateVideo()">🎬 GENERATE VIDEO</button>
+                <button class="btn btn-primary" onclick="generateVideo()">🎬 GENERATE VIDEO</button>
             </div>
         </div>
 
         <div class="section">
-            <h2>🎬 Recent Videos</h2>
-            <div id="videos-list" class="videos-list">
-                <p>Loading videos...</p>
+            <h2>🔗 Connected Accounts</h2>
+            <div id="accountsList" class="accounts-grid">
+                <!-- Accounts will be loaded here -->
+            </div>
+        </div>
+
+        <div class="section">
+            <h2>📹 Recent Videos</h2>
+            <div id="videosList" class="videos-list">
+                <!-- Videos will be loaded here -->
             </div>
         </div>
     </div>
 
     <script>
-        // Auto-refresh data every 30 seconds
-        setInterval(refreshData, 30000);
-        
-        // Initial load
-        refreshData();
+        // Load data on page load
+        document.addEventListener('DOMContentLoaded', function() {
+            loadSystemStatus();
+            loadAccounts();
+            loadVideos();
+            
+            // Auto-refresh every 30 seconds
+            setInterval(loadSystemStatus, 30000);
+        });
 
-        function refreshData() {
-            fetchStatus();
-            fetchAccounts();
-            fetchVideos();
+        async function loadSystemStatus() {
+            try {
+                const response = await fetch('/api/status');
+                const data = await response.json();
+                
+                document.getElementById('connectedAccounts').textContent = data.connected_accounts;
+                document.getElementById('totalVideos').textContent = data.total_videos;
+                document.getElementById('todayVideos').textContent = data.today_videos;
+                document.getElementById('totalViews').textContent = data.total_views.toLocaleString();
+                document.getElementById('totalRevenue').textContent = '$' + data.total_revenue.toFixed(2);
+                
+                const statusElement = document.getElementById('automationStatus');
+                if (data.automation_running) {
+                    statusElement.textContent = '🚀 RUNNING';
+                    statusElement.className = 'automation-status status-running';
+                } else {
+                    statusElement.textContent = '⏹️ STOPPED';
+                    statusElement.className = 'automation-status status-stopped';
+                }
+            } catch (error) {
+                console.error('Error loading status:', error);
+            }
         }
 
-        function fetchStatus() {
-            fetch('/api/status')
-                .then(response => response.json())
-                .then(data => {
-                    document.getElementById('automation-status').textContent = data.automation_status;
-                    document.getElementById('connected-accounts').textContent = data.connected_accounts;
-                    document.getElementById('total-videos').textContent = data.total_videos;
-                    document.getElementById('today-videos').textContent = data.today_videos;
-                })
-                .catch(error => console.error('Error fetching status:', error));
+        async function loadAccounts() {
+            try {
+                const response = await fetch('/api/accounts');
+                const accounts = await response.json();
+                
+                const accountsList = document.getElementById('accountsList');
+                accountsList.innerHTML = accounts.map(account => `
+                    <div class="account-card">
+                        <h3>${account.platform.toUpperCase()}</h3>
+                        <p><strong>${account.username}</strong></p>
+                        <p class="status-connected">✅ ${account.status}</p>
+                        <p><small>Connected: ${new Date(account.created_at).toLocaleDateString()}</small></p>
+                    </div>
+                `).join('');
+            } catch (error) {
+                console.error('Error loading accounts:', error);
+            }
         }
 
-        function fetchAccounts() {
-            fetch('/api/accounts')
-                .then(response => response.json())
-                .then(accounts => {
-                    const accountsList = document.getElementById('accounts-list');
-                    
-                    if (accounts.length === 0) {
-                        accountsList.innerHTML = '<p>No accounts connected yet. Click the OAuth buttons above to connect!</p>';
-                        return;
-                    }
-                    
-                    accountsList.innerHTML = accounts.map(account => `
-                        <div class="account-item">
-                            <div class="account-info">
-                                <strong>${account.platform.toUpperCase()}</strong> - ${account.username}
-                                <br><small>✅ OAuth Connected!</small>
-                                ${account.url ? `<br><a href="${account.url}" target="_blank" style="color: #74b9ff;">${account.url}</a>` : ''}
-                            </div>
-                            <div class="account-stats">
-                                <div>📹 ${account.videos}</div>
-                                <div>👁️ ${account.views.toLocaleString()}</div>
-                                <div>💰 $${account.revenue.toFixed(2)}</div>
-                            </div>
-                        </div>
-                    `).join('');
-                })
-                .catch(error => console.error('Error fetching accounts:', error));
-        }
-
-        function fetchVideos() {
-            fetch('/api/videos')
-                .then(response => response.json())
-                .then(videos => {
-                    const videosList = document.getElementById('videos-list');
-                    
-                    if (videos.length === 0) {
-                        videosList.innerHTML = '<p>No videos created yet. Start automation or generate a video manually!</p>';
-                        return;
-                    }
-                    
+        async function loadVideos() {
+            try {
+                const response = await fetch('/api/videos');
+                const videos = await response.json();
+                
+                const videosList = document.getElementById('videosList');
+                if (videos.length === 0) {
+                    videosList.innerHTML = '<p>No videos created yet. Generate your first video!</p>';
+                } else {
                     videosList.innerHTML = videos.map(video => `
                         <div class="video-item">
-                            <div class="video-title">${video.title}</div>
+                            <h4>${video.title}</h4>
+                            <p><strong>Platform:</strong> ${video.platform.toUpperCase()} | <strong>AI:</strong> ${video.ai_service}</p>
                             <div class="video-stats">
-                                <span><strong>${video.platform.toUpperCase()}</strong></span>
-                                <span>🤖 ${video.ai_service}</span>
-                                <span>👁️ ${video.views.toLocaleString()} views</span>
+                                <span>👁️ ${video.views} views</span>
                                 <span>❤️ ${video.likes} likes</span>
                                 <span>💰 $${video.revenue.toFixed(2)}</span>
-                                <span>✅ ${video.status}</span>
-                                ${video.video_url ? `<a href="${video.video_url}" target="_blank" style="color: #74b9ff;">🔗 View Video</a>` : ''}
+                                <span>📅 ${new Date(video.created_at).toLocaleDateString()}</span>
                             </div>
-                            <div style="margin-top: 10px; font-size: 0.8em; opacity: 0.7;">
-                                📁 File: ${video.video_file_path || 'N/A'} | 🆔 ID: ${video.youtube_video_id} | 📅 ${video.created_date}
-                            </div>
+                            ${video.video_url ? `<p><a href="${video.video_url}" target="_blank" style="color: #FFD700;">🔗 View Video</a></p>` : ''}
                         </div>
                     `).join('');
-                })
-                .catch(error => console.error('Error fetching videos:', error));
-        }
-
-        function connectOAuth(platform) {
-            fetch(`/api/oauth/connect/${platform}`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
                 }
-            })
-            .then(response => response.json())
-            .then(data => {
-                alert(data.message);
-                refreshData();
-            })
-            .catch(error => {
-                console.error('Error:', error);
-                alert('Error connecting account');
-            });
+            } catch (error) {
+                console.error('Error loading videos:', error);
+            }
         }
 
-        function startAutomation() {
-            fetch('/api/start-automation', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
+        async function connectAccount(platform) {
+            try {
+                const response = await fetch('/api/connect-account', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ platform })
+                });
+                
+                const result = await response.json();
+                if (result.success) {
+                    alert(`✅ ${platform.toUpperCase()} account connected successfully!`);
+                    loadSystemStatus();
+                    loadAccounts();
+                } else {
+                    alert(`❌ Failed to connect ${platform}: ${result.error}`);
                 }
-            })
-            .then(response => response.json())
-            .then(data => {
-                alert(data.message);
-                refreshData();
-            })
-            .catch(error => {
-                console.error('Error:', error);
-                alert('Error starting automation');
-            });
+            } catch (error) {
+                alert(`❌ Error connecting ${platform}: ${error.message}`);
+            }
         }
 
-        function stopAutomation() {
-            fetch('/api/stop-automation', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                }
-            })
-            .then(response => response.json())
-            .then(data => {
-                alert(data.message);
-                refreshData();
-            })
-            .catch(error => {
-                console.error('Error:', error);
-                alert('Error stopping automation');
-            });
-        }
-
-        function generateVideo() {
-            const topic = document.getElementById('video-topic').value || 'How to Make Money with YouTube in 2025';
-            const aiService = document.getElementById('ai-service').value;
-            const duration = document.getElementById('duration').value;
+        async function generateVideo() {
+            const topic = document.getElementById('videoTopic').value;
+            const aiService = document.getElementById('aiService').value;
+            const duration = document.getElementById('videoDuration').value;
             
-            console.log('Generating video with:', { topic, aiService, duration });
+            if (!topic) {
+                alert('Please enter a video topic');
+                return;
+            }
             
-            fetch('/api/generate-video', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({
-                    topic: topic,
-                    ai_service: aiService,
-                    duration: duration
-                })
-            })
-            .then(response => response.json())
-            .then(data => {
-                alert(data.message);
-                if (data.success) {
-                    document.getElementById('video-topic').value = '';
-                    refreshData();
+            try {
+                const response = await fetch('/api/generate-video', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ 
+                        title: topic, 
+                        ai_service: aiService, 
+                        duration: parseInt(duration) 
+                    })
+                });
+                
+                const result = await response.json();
+                if (result.success) {
+                    alert(`✅ Video "${topic}" generated and uploaded successfully!`);
+                    document.getElementById('videoTopic').value = '';
+                    loadSystemStatus();
+                    loadVideos();
+                } else {
+                    alert(`❌ Video generation failed: ${result.error}`);
                 }
-            })
-            .catch(error => {
-                console.error('Error:', error);
-                alert('Error generating video');
-            });
+            } catch (error) {
+                alert(`❌ Error generating video: ${error.message}`);
+            }
+        }
+
+        async function startAutomation() {
+            try {
+                const response = await fetch('/api/automation/start', { method: 'POST' });
+                const result = await response.json();
+                
+                if (result.success) {
+                    alert('🚀 Automation started successfully!');
+                    loadSystemStatus();
+                } else {
+                    alert(`❌ Failed to start automation: ${result.error}`);
+                }
+            } catch (error) {
+                alert(`❌ Error starting automation: ${error.message}`);
+            }
+        }
+
+        async function stopAutomation() {
+            try {
+                const response = await fetch('/api/automation/stop', { method: 'POST' });
+                const result = await response.json();
+                
+                if (result.success) {
+                    alert('⏹️ Automation stopped successfully!');
+                    loadSystemStatus();
+                } else {
+                    alert(`❌ Failed to stop automation: ${result.error}`);
+                }
+            } catch (error) {
+                alert(`❌ Error stopping automation: ${error.message}`);
+            }
+        }
+
+        async function refreshData() {
+            try {
+                const response = await fetch('/api/refresh-data', { method: 'POST' });
+                const result = await response.json();
+                
+                if (result.success) {
+                    alert('🔄 Data refreshed successfully!');
+                    loadSystemStatus();
+                    loadVideos();
+                } else {
+                    alert('❌ Failed to refresh data');
+                }
+            } catch (error) {
+                alert(`❌ Error refreshing data: ${error.message}`);
+            }
         }
     </script>
 </body>
 </html>
 '''
 
-if __name__ == '__main__':
-    # Initialize database
-    init_database()
-    
-    print("🚀 TekNet Global Automation System - DEPLOYMENT READY")
-    print("✅ No dependency conflicts")
-    print("✅ Render compatible") 
-    print("✅ User input handling fixed")
-    print("✅ Video file creation working")
-    print(f"🔑 YouTube API Key: {YOUTUBE_API_KEY[:20]}...")
-    
-    # Start the Flask app
-    port = int(os.environ.get('PORT', 5000))
-    app.run(host='0.0.0.0', port=port, debug=False)
+if __name__ == "__main__":
+    print("🚀 Starting REAL Automation System...")
+    print("📊 Dashboard: http://localhost:5000")
+    app.run(host='0.0.0.0', port=5000, debug=False)
